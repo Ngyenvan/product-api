@@ -81,3 +81,53 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/product-api:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/product-api:${{ github.sha }}
+
+
+  deploy-local:
+
+    needs: build-and-push
+
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Login Docker Hub
+        shell: powershell
+        run: |
+          "${{ secrets.DOCKERHUB_TOKEN }}" | docker login `
+            -u "${{ secrets.DOCKERHUB_USERNAME }}" `
+            --password-stdin
+
+      - name: Pull latest image
+        shell: powershell
+        run: |
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+
+          docker compose `
+            -f docker-compose-prod.yaml `
+            pull
+
+      - name: Deploy Product API
+        shell: powershell
+        run: |
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+
+          docker compose `
+            -f docker-compose-prod.yaml `
+            up -d `
+            --remove-orphans
+
+      - name: Check containers
+        shell: powershell
+        run: |
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+
+          docker compose `
+            -f docker-compose-prod.yaml `
+            ps
