@@ -97,10 +97,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Login Docker Hub
+      - name: Check Docker Hub credentials
         shell: powershell
         run: |
-          "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.DOCKERHUB_USERNAME }}")) {
+            throw "DOCKERHUB_USERNAME is empty"
+          }
+
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.DOCKERHUB_TOKEN }}")) {
+            throw "DOCKERHUB_TOKEN is empty"
+          }
+
+          Write-Host "DOCKERHUB_USERNAME exists"
+          Write-Host "DOCKERHUB_TOKEN exists"
+
 
       - name: Pull latest image
         shell: powershell
