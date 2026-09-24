@@ -100,34 +100,25 @@ jobs:
       - name: Login Docker Hub
         shell: powershell
         run: |
-          "${{secrets.DOCKERHUB_TOKEN}}" | docker login `
-            -u "${{secrets.DOCKERHUB_USERNAME}}" ` 
-            --password-stdin
+          "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Pull latest image
         shell: powershell
         run: |
-          $env:DOCKERHUB_USERNAME="${{secrets.DOCKERHUB_USERNAME}}"
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose `
-            -f docker-compose-prod.yaml `
-            pull
+          docker compose -f docker-compose-prod.yaml pull
 
       - name: Deploy Product API
         shell: powershell
         run: |
-          $env:DOCKERHUB_USERNAME="${{secrets.DOCKERHUB_USERNAME}}"
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose `
-            -f docker-compose-prod.yaml `
-            up -d `
-            --remove-orphans
+          docker compose -f docker-compose-prod.yaml up -d --remove-orphans
 
       - name: Check containers
         shell: powershell
         run: |
-          $env:DOCKERHUB_USERNAME="${{secrets.DOCKERHUB_USERNAME}}"
+          $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose `
-            -f docker-compose-prod.yaml `
-            ps
+          docker compose -f docker-compose-prod.yaml ps
