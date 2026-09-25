@@ -1,4 +1,4 @@
-name: Product API CI
+name: Product API CI/CD
 
 on:
   push:
@@ -11,81 +11,361 @@ on:
 
 jobs:
 
-  test:
+  ci:
+    name: CI - Docker Healthcheck and CRUD Test
 
     runs-on: ubuntu-latest
 
-    services:
-
-      mongodb:
-        image: mongo:8.0
-
-        ports:
-          - 27017:27017
-
-        options: >-
-          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 10s
 
     env:
-      MONGO_URI: mongodb://127.0.0.1:27017/productdb_test
+
+      MONGO_URI_COMPOSE: mongodb://mongodb:27017/productdb_ci
 
     steps:
 
+      # =========================================================
+      # 1. Lấy source code
+
+      # =========================================================
       - name: Checkout source code
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run CRUD tests
-        run: npm test
+      # =========================================================
+      # 2. Kiểm tra Docker
+      # =========================================================
+      - name: Check Docker versions
+        run: |
+          docker --version
+          docker compose version
 
 
-  build-and-push:
+      # =========================================================
+      # 3. Dọn container cũ
+      # =========================================================
+      - name: Clean old containers
+        run: |
+          docker compose -f docker-compose.yaml down -v --remove-orphans || true
 
-    needs: test
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # =========================================================
+      # 4. Build Product API image
+      #    + chạy MongoDB container
+      #    + chạy Product API container
+      # =========================================================
+      - name: Build and start actual containers
+        run: |
+          docker compose -f docker-compose.yaml up -d --build
 
-    runs-on: ubuntu-latest
 
-    steps:
+      # =========================================================
+      # 5. Xem trạng thái container
+      # =========================================================
+      - name: Show containers
+        run: |
+          docker compose -f docker-compose.yaml ps
 
-      - name: Checkout source code
-        uses: actions/checkout@v7
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      # =========================================================
+      # 6. HEALTHCHECK MongoDB
+      # =========================================================
+      - name: Wait for MongoDB healthy
+        shell: bash
+        run: |
+          echo "Waiting for MongoDB..."
+
+          for i in {1..30}
+          do
+
+            STATUS=$(docker inspect \
+              --format='{{.State.Health.Status}}' \
+              nammongodb 2>/dev/null || true)
+
+            echo "MongoDB health = $STATUS"
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MongoDB is HEALTHY"
+              exit 0
+            fi
+
+            sleep 2
+
+          done
+
+          echo "MongoDB did not become healthy"
+
+          docker compose -f docker-compose.yaml logs mongodb
+
+          exit 1
+
+
+      # =========================================================
+      # 7. HEALTHCHECK Product API container
+      # =========================================================
+      - name: Wait for Product API healthy
+        shell: bash
+        run: |
+          echo "Waiting for Product API..."
+
+          for i in {1..30}
+          do
+
+            STATUS=$(docker inspect \
+              --format='{{.State.Health.Status}}' \
+              product-api 2>/dev/null || true)
+
+            echo "Product API health = $STATUS"
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Product API is HEALTHY"
+              exit 0
+            fi
+
+            sleep 2
+
+          done
+
+          echo "Product API did not become healthy"
+
+          docker compose -f docker-compose.yaml logs product-api
+
+          exit 1
+
+
+      # =========================================================
+      # 8. Kiểm tra /health bằng HTTP thật
+      # =========================================================
+      - name: Test Product API health endpoint
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            http://localhost:3000/health)
+
+          echo "$RESPONSE"
+
+          echo "$RESPONSE" | grep -q '"status":"ok"'
+
+
+      # =========================================================
+      # 9. CRUD TEST - CREATE
+      # =========================================================
+      - name: CRUD - CREATE Product
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            -X POST \
+            http://localhost:3000/api/products \
+            -H "Content-Type: application/json" \
+            -d '{
+              "pid":"CI001",
+              "pname":"CI Pen",
+              "price":10000,
+              "quantity":20
+            }')
+
+          echo "$RESPONSE"
+
+          echo "$RESPONSE" | grep -q '"pid":"CI001"'
+
+
+      # =========================================================
+      # 10. CRUD TEST - READ ALL
+      # =========================================================
+      - name: CRUD - READ ALL Products
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            http://localhost:3000/api/products)
+
+          echo "$RESPONSE"
+
+          echo "$RESPONSE" | grep -q '"pid":"CI001"'
+
+
+      # =========================================================
+      # 11. CRUD TEST - READ ONE
+      # =========================================================
+      - name: CRUD - READ ONE Product
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            http://localhost:3000/api/products/CI001)
+
+          echo "$RESPONSE"
+
+          echo "$RESPONSE" | grep -q '"pid":"CI001"'
+
+
+      # =========================================================
+      # 12. CRUD TEST - UPDATE
+      # =========================================================
+      - name: CRUD - UPDATE Product
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            -X PUT \
+            http://localhost:3000/api/products/CI001 \
+            -H "Content-Type: application/json" \
+            -d '{
+              "pname":"CI Pen Updated",
+              "price":15000,
+              "quantity":50
+            }')
+
+          echo "$RESPONSE"
+
+          echo "$RESPONSE" | grep -q '"quantity":50'
+
+
+      # =========================================================
+      # 13. CRUD TEST - DELETE
+      # =========================================================
+      - name: CRUD - DELETE Product
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            -X DELETE \
+            http://localhost:3000/api/products/CI001)
+
+          echo "$RESPONSE"
+
+
+      # =========================================================
+      # 14. Xác nhận product đã thật sự bị xóa
+      # =========================================================
+      - name: Verify Product deleted
+        shell: bash
+        run: |
+
+          RESPONSE=$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            http://localhost:3000/api/products)
+
+          echo "$RESPONSE"
+
+          if echo "$RESPONSE" | grep -q '"pid":"CI001"'
+          then
+
+            echo "ERROR: Product CI001 still exists"
+
+            exit 1
+
+          fi
+
+          echo "DELETE test passed"
+
+
+      # =========================================================
+      # ==================== CD DOCKER HUB =======================
+      # =========================================================
+
+      # Chỉ chạy khi push vào main.
+
+
+      # Pull Request chỉ chạy CI, không push Docker Hub.
 
       - name: Login to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
         uses: docker/login-action@v4
+
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: |
+
+      # =========================================================
+      # Push CHÍNH image vừa được CI test
+      # =========================================================
+      - name: Tag tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+        shell: bash
+
+        run: |
+
+          docker tag \
+            product-api:local \
             ${{ secrets.DOCKERHUB_USERNAME }}/product-api:latest
+
+          docker tag \
+            product-api:local \
             ${{ secrets.DOCKERHUB_USERNAME }}/product-api:${{ github.sha }}
 
 
+      - name: Push tested image to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+        shell: bash
+
+        run: |
+
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/product-api:latest
+
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/product-api:${{ github.sha }}
+
+
+      # =========================================================
+      # Luôn in log, kể cả CI thành công hay thất bại
+      # =========================================================
+      - name: Show Docker logs
+        if: always()
+
+        run: |
+          docker compose -f docker-compose.yaml logs --no-color
+
+
+      # =========================================================
+      # Luôn dọn container CI
+      # =========================================================
+      - name: Stop CI containers
+        if: always()
+
+        run: |
+          docker compose -f docker-compose.yaml down -v --remove-orphans
+
+
+
+  # =============================================================
+  # PROMPT 14
+  # GitHub Actions -> Docker Hub -> Local Docker Engine
+  # =============================================================
+
   deploy-local:
 
-    needs: build-and-push
+    name: CD - Deploy to Local Docker Engine
+
+    needs: ci
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     runs-on:
       - self-hosted
@@ -94,32 +374,170 @@ jobs:
 
     steps:
 
+      # =========================================================
+      # Lấy docker-compose-prod.yaml
+      # =========================================================
       - name: Checkout repository
         uses: actions/checkout@v7
 
+
+      # =========================================================
+      # Login Docker Hub
+      # =========================================================
       - name: Login to Docker Hub
         uses: docker/login-action@v4
+
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Pull latest image
+
+      # =========================================================
+      # Pull image vừa được GitHub Actions push
+      # =========================================================
+      - name: Pull latest Docker Hub image
         shell: powershell
+
         run: |
+
           $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose -f docker-compose-prod.yaml pull
+          $env:PRODUCT_IMAGE_TAG="latest"
 
+          docker compose `
+            -f docker-compose-prod.yaml `
+            pull
+
+
+      # =========================================================
+      # Deploy vào Docker Desktop / Local Docker Engine
+      # =========================================================
       - name: Deploy Product API
         shell: powershell
+
         run: |
+
           $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose -f docker-compose-prod.yaml up -d --remove-orphans
+          $env:PRODUCT_IMAGE_TAG="latest"
 
-      - name: Check containers
+          docker compose `
+            -f docker-compose-prod.yaml `
+            up -d --remove-orphans
+
+
+      # =========================================================
+      # Chờ MongoDB healthy
+      # =========================================================
+      - name: Wait for MongoDB healthy
         shell: powershell
+
         run: |
+
+          $Healthy = $false
+
+          for ($i = 1; $i -le 30; $i++) {
+
+            $Status = docker inspect `
+              --format "{{.State.Health.Status}}" `
+              nammongodb 2>$null
+
+            Write-Host "MongoDB health = $Status"
+
+            if ($Status -eq "healthy") {
+
+              $Healthy = $true
+
+              break
+
+            }
+
+            Start-Sleep -Seconds 2
+          }
+
+          if (-not $Healthy) {
+
+            Write-Host "MongoDB is not healthy"
+
+            docker compose `
+              -f docker-compose-prod.yaml `
+              logs mongodb
+
+            exit 1
+          }
+
+
+      # =========================================================
+      # Chờ Product API healthy
+      # =========================================================
+      - name: Wait for Product API healthy
+        shell: powershell
+
+        run: |
+
+          $Healthy = $false
+
+          for ($i = 1; $i -le 30; $i++) {
+
+            $Status = docker inspect `
+              --format "{{.State.Health.Status}}" `
+              product-api 2>$null
+
+            Write-Host "Product API health = $Status"
+
+            if ($Status -eq "healthy") {
+
+              $Healthy = $true
+
+              break
+
+            }
+
+            Start-Sleep -Seconds 2
+          }
+
+          if (-not $Healthy) {
+
+            Write-Host "Product API is not healthy"
+
+            docker compose `
+              -f docker-compose-prod.yaml `
+              logs product-api
+
+            exit 1
+          }
+
+
+      # =========================================================
+      # Test production container
+      # =========================================================
+      - name: Verify deployed API
+        shell: powershell
+
+        run: |
+
+          $Response = Invoke-RestMethod `
+            -Uri "http://localhost:3000/health" `
+            -Method Get
+
+          Write-Host "API status:" $Response.status
+
+          if ($Response.status -ne "ok") {
+
+            exit 1
+          }
+
+
+      # =========================================================
+      # Hiển thị kết quả cuối
+      # =========================================================
+      - name: Show production containers
+        shell: powershell
+
+        run: |
+
           $env:DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
-          docker compose -f docker-compose-prod.yaml ps
+          docker compose `
+            -f docker-compose-prod.yaml `
+            ps
