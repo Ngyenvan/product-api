@@ -5,7 +5,7 @@ const app = require("../app");
 const Product = require("../src/models/Product");
 
 const TEST_MONGO_URI =
-"mongodb://127.0.0.1:27017/productdb_test";
+"mongodb://nammongodb:27017/productdb_test";
 
 beforeAll(async () => {
 await mongoose.connect(TEST_MONGO_URI, {

@@ -4,10 +4,11 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci --omit=dev
+RUN npm install
 
 COPY app.js server.js ./
 COPY src ./src
+COPY tests ./tests
 
 EXPOSE 3000
 
