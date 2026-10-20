@@ -4,8 +4,8 @@ const mongoose = require("mongoose");
 const app = require("../app");
 const Product = require("../src/models/Product");
 
-const TEST_MONGO_URI =
-"mongodb://nammongodb:27017/productdb_test";
+const TEST_MONGO_URI = process.env.TEST_MONGO_URI || process.env.MONGO_URI || "mongodb://127.0.0.1:27017/productdb";
+"mongodb://127.0.0.1:27017/productdb_test";
 
 beforeAll(async () => {
 await mongoose.connect(TEST_MONGO_URI, {
