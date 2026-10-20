@@ -1,4 +1,4 @@
-name: Node.js CI
+name: Product API CI/CD Pipeline
 
 on:
   push:
@@ -7,33 +7,31 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Start MongoDB
+      - name: Setup environment file
         run: |
-          docker run -d --name mongodb -p 27017:27017 mongo:8.0
-          until docker exec mongodb mongosh --eval "db.adminCommand({ping: 1})" > /dev/null 2>&1; do
-            echo "Waiting for MongoDB to be ready..."
-            sleep 1
-          done
-          echo "MongoDB is ready!"
+          touch .env
+          echo "PORT=3000" >> .env
+          echo "MONGO_URI=mongodb://nammongodb:27017/productdb" >> .env
+          echo "TEST_MONGO_URI=mongodb://nammongodb:27017/productdb" >> .env
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Run Docker Compose
+        run: docker compose up -d --build
 
-      - name: Install dependencies
-        run: npm install
+      - name: Print container logs on error
+        if: failure()
+        run: docker compose logs
 
-      - name: Run tests
-        env:
-          TEST_MONGO_URI: mongodb://127.0.0.1:27017/productdb
-          MONGO_URI: mongodb://127.0.0.1:27017/productdb
-        run: npm test
+      - name: Run test suite inside API container
+        run: docker compose exec -T product-api npm test
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
